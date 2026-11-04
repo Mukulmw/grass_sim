@@ -1,59 +1,125 @@
 <?xml version="1.0"?>
+<!--
+  GRASS RPR arm: J1 (revolute) -> Z (prismatic) -> J2 (revolute), joint order of "MOVE j1 z j2".
+
+  The world frame IS the task frame of kinematics.py / Kinematic_plot.py / plants.yaml (in metres):
+  origin on the J1 axis, +Y towards the tray, +X sideways, +Z up. j1 = j2 = 0 stretches the arm
+  along +Y; a positive angle swings it towards -X (a right-hand turn about +Z). With no camera
+  offset configured, camera_link sits at
+      x = -(L1 sin j1 + L2 sin(j1 + j2)),  y = L1 cos j1 + L2 cos(j1 + j2),  z = z_joint
+  which is exactly forward_kinematics(). L1 = 260 mm, L2 = 360 mm, limits from robot.yaml.
+  Assumption (visual only): the Z axis is a vertical rail at the end of link 1 carrying J2.
+-->
 <robot name="grass">
+
+  <material name="frame"><color rgba="0.25 0.25 0.28 1"/></material>
+  <material name="link1"><color rgba="0.13 0.45 0.50 1"/></material>
+  <material name="link2"><color rgba="0.20 0.60 0.64 1"/></material>
+  <material name="motor"><color rgba="0.08 0.08 0.08 1"/></material>
+  <material name="camera"><color rgba="0.55 0.55 0.58 1"/></material>
+  <material name="lens"><color rgba="0.05 0.05 0.10 1"/></material>
 
   <link name="world"/>
 
   <joint name="world_fix" type="fixed">
     <parent link="world"/><child link="base_link"/>
-    <origin xyz="0 0 0.5"/>
   </joint>
 
-  <!-- base with a fixed column (visual only) -->
   <link name="base_link">
-    <visual><geometry><cylinder radius="0.06" length="0.05"/></geometry></visual>
     <visual>
-      <origin xyz="0 0 0.15"/>
-      <geometry><cylinder radius="0.02" length="0.30"/></geometry>
+      <origin xyz="0 0 -0.20"/>
+      <geometry><cylinder radius="0.025" length="0.36"/></geometry>
+      <material name="frame"/>
+    </visual>
+    <visual>
+      <origin xyz="0 0 -0.385"/>
+      <geometry><box size="0.16 0.16 0.015"/></geometry>
+      <material name="frame"/>
+    </visual>
+    <visual>
+      <origin xyz="0 0 -0.04"/>
+      <geometry><box size="0.042 0.042 0.048"/></geometry>
+      <material name="motor"/>
     </visual>
   </link>
 
-  <!-- Z: the whole arm slides up and down on the column -->
-  <joint name="z_joint" type="prismatic">
-    <parent link="base_link"/><child link="carriage"/>
-    <origin xyz="0 0 0.05"/><axis xyz="0 0 1"/>
-    <limit lower="0" upper="0.2" effort="50" velocity="0.05"/>
+  <joint name="j1" type="revolute">
+    <parent link="base_link"/><child link="link1"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-2.094395" upper="2.094395" effort="10" velocity="1.0"/>
+  </joint>
+  <link name="link1">
+    <visual>
+      <origin xyz="0 0.13 0"/>
+      <geometry><box size="0.05 0.30 0.02"/></geometry>
+      <material name="link1"/>
+    </visual>
+    <!-- Z rail at the elbow -->
+    <visual>
+      <origin xyz="0 0.26 0.09"/>
+      <geometry><cylinder radius="0.008" length="0.20"/></geometry>
+      <material name="frame"/>
+    </visual>
+    <visual>
+      <origin xyz="0 0.26 0.21"/>
+      <geometry><box size="0.042 0.042 0.048"/></geometry>
+      <material name="motor"/>
+    </visual>
+  </link>
+
+  <joint name="z" type="prismatic">
+    <parent link="link1"/><child link="carriage"/>
+    <origin xyz="0 0.26 0"/><axis xyz="0 0 1"/>
+    <limit lower="0.0" upper="0.150" effort="50" velocity="0.02"/>
   </joint>
   <link name="carriage">
-    <visual><geometry><box size="0.08 0.08 0.03"/></geometry></visual>
+    <visual>
+      <geometry><box size="0.05 0.05 0.03"/></geometry>
+      <material name="frame"/>
+    </visual>
+    <visual>
+      <origin xyz="0 0 0.04"/>
+      <geometry><box size="0.042 0.042 0.048"/></geometry>
+      <material name="motor"/>
+    </visual>
   </link>
 
-  <!-- J1: spins arm 1 -->
-  <joint name="j1" type="revolute">
-    <parent link="carriage"/><child link="arm1"/>
-    <origin xyz="0 0 0"/><axis xyz="0 0 1"/>
-    <limit lower="-2.4" upper="2.4" effort="10" velocity="1.5"/>
-  </joint>
-  <link name="arm1">
-    <visual><origin xyz="0.13 0 0.02"/><geometry><box size="0.26 0.04 0.02"/></geometry></visual>
-  </link>
-
-  <!-- J2: elbow at the end of arm 1 -->
   <joint name="j2" type="revolute">
-    <parent link="arm1"/><child link="arm2"/>
-    <origin xyz="0.26 0 0"/><axis xyz="0 0 1"/>
-    <limit lower="-2.6" upper="2.6" effort="10" velocity="1.5"/>
+    <parent link="carriage"/><child link="link2"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-2.792527" upper="2.792527" effort="10" velocity="1.0"/>
   </joint>
-  <link name="arm2">
-    <visual><origin xyz="0.17 0 0.04"/><geometry><box size="0.34 0.04 0.02"/></geometry></visual>
+  <link name="link2">
+    <visual>
+      <origin xyz="0 0.18 -0.025"/>
+      <geometry><box size="0.04 0.40 0.015"/></geometry>
+      <material name="link2"/>
+    </visual>
   </link>
 
-  <!-- tcp = tip of the robot, where the camera is -->
-  <joint name="tcp_joint" type="fixed">
-    <parent link="arm2"/><child link="tcp"/>
-    <origin xyz="0.34 0 0"/>
+  <!-- camera_link = the FK point (no TCP offset configured); the D435 hangs below it, looking down -->
+  <joint name="camera_joint" type="fixed">
+    <parent link="link2"/><child link="camera_link"/>
+    <origin xyz="0 0.36 0"/>
   </joint>
-  <link name="tcp">
-    <visual><geometry><sphere radius="0.015"/></geometry></visual>
+  <link name="camera_link">
+    <visual>
+      <origin xyz="0 0 -0.045"/>
+      <geometry><box size="0.090 0.025 0.025"/></geometry>
+      <material name="camera"/>
+    </visual>
+    <visual>
+      <origin xyz="0.015 0 -0.058"/>
+      <geometry><cylinder radius="0.006" length="0.002"/></geometry>
+      <material name="lens"/>
+    </visual>
   </link>
+
+  <!-- ROS optical convention: z forward (down at the tray), x right, y down the image -->
+  <joint name="camera_optical_joint" type="fixed">
+    <parent link="camera_link"/><child link="camera_optical_frame"/>
+    <origin xyz="0 0 -0.058" rpy="3.141593 0 0"/>
+  </joint>
+  <link name="camera_optical_frame"/>
 
 </robot>
