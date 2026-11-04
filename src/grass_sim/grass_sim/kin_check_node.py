@@ -3,18 +3,26 @@ Kinematics validation in RViz, against grass_controller.kinematics (the controll
 
 FK check: the stick model is posed by robot_state_publisher from /joint_states (sliders), i.e. by
 the URDF/TF chain. For the same joint values this node evaluates kinematics.forward_kinematics()
-and draws its result as a translucent sphere around the stick tip, with the TF-vs-FK error in mm.
+and draws its result as a translucent sphere around the stick tip; the TF-vs-FK error in mm is in
+the table window (top right of the screen, always on top).
 The TF is matched to the exact joint_states message it was computed from (by stamp).
 
 IK check: drag the orange target. Both elbow solutions of kinematics.inverse_kinematics() are drawn
-as ghost sticks (green: inside robot.yaml limits, red: outside), with the elbow that
-pick_ik_solution() would choose and the round-trip error |FK(IK(target)) - target|.
+as ghost sticks (green: inside robot.yaml limits, red: outside); the table lists their joint values,
+the elbow pick_ik_solution() would choose and the round-trip error |FK(IK(target)) - target|.
 """
 
 import math
+import signal
+import sys
 
 import numpy as np
+from python_qt_binding.QtCore import Qt, QTimer
+from python_qt_binding.QtGui import QColor, QFont
+from python_qt_binding.QtWidgets import (QApplication, QHeaderView, QTableWidget,
+                                         QTableWidgetItem)
 import rclpy
+from rclpy.executors import SingleThreadedExecutor
 from rclpy.node import Node
 from rclpy.time import Time
 from geometry_msgs.msg import Point
@@ -144,13 +152,12 @@ class KinCheck(Node):
         sphere.scale.x = sphere.scale.y = sphere.scale.z = 0.03
         sphere.color = rgba(GREEN if err < 0.01 else RED, 0.35)
         elbow = kinematics.elbow_of(joints[2]) or 'singular'
-        text = (f'FK CHECK (sliders)\n'
-                f'j1 {joints[0]:8.2f} deg   z {joints[1]:6.1f} mm   j2 {joints[2]:8.2f} deg\n'
-                f'kinematics.py  x {fk.x_mm:8.2f}  y {fk.y_mm:8.2f}  z {fk.z_cart_mm:6.1f} mm\n'
-                f'URDF / TF      x {tf_mm[0]:8.2f}  y {tf_mm[1]:8.2f}  z {tf_mm[2]:6.1f} mm\n'
-                f'error {err:.4f} mm    elbow {elbow}')
-        label = self._text('fk', 1, pt(450, -250, 250), text, GREEN if err < 0.01 else RED)
-        self._fk_markers = [sphere, label]
+        self.fk_rows = [
+            ('Sliders → kinematics.py', joints, (fk.x_mm, fk.y_mm, fk.z_cart_mm),
+             f'error {err:.4f} mm', err < 0.01),
+            ('URDF / TF', None, tf_mm, f'elbow {elbow}', None),
+        ]
+        self._fk_markers = [sphere]
         self._publish()
 
     # ------------------------------------------------------------------ IK check
@@ -191,6 +198,7 @@ class KinCheck(Node):
     def _solve_ik(self, log=False):
         x, y, z = self._target
         out, lines = [], [f'IK CHECK  target x {x:.1f}  y {y:.1f}  z {z:.1f} mm']
+        rows = [('IK target (drag)', None, (x, y, z), '', None)]
         try:
             picked = kinematics.pick_ik_solution(
                 x, y, z, **self._geo,
@@ -203,6 +211,7 @@ class KinCheck(Node):
                 j = kinematics.inverse_kinematics(x, y, z, elbow=elbow, **self._geo)
             except ValueError as e:
                 lines.append(f'{elbow:>4}: {e}')
+                rows.append((f'IK {elbow}', None, None, 'unreachable', False))
                 continue
             ok = self._in_limits(j)
             back = kinematics.forward_kinematics(j.j1_deg, j.z_joint_mm, j.j2_deg, **self._geo)
@@ -222,23 +231,110 @@ class KinCheck(Node):
                          f'j2 {j.j2_deg:8.2f}  round-trip {rt:.2e} mm  '
                          + ('in limits' if not bad else 'OUT: ' + ','.join(bad))
                          + ('  <- picked' if elbow == picked else ''))
+            rows.append((f'IK {elbow}' + ('  ← picked' if elbow == picked else ''),
+                         (j.j1_deg, j.z_joint_mm, j.j2_deg),
+                         (back.x_mm, back.y_mm, back.z_cart_mm),
+                         ('in limits' if not bad else 'OUT: ' + ', '.join(bad))
+                         + f'   round-trip {rt:.1e} mm', not bad))
         if picked is None and len(lines) == 3:
             lines.append('pick_ik_solution: no elbow inside the j1/j2 limits')
-        out.append(self._text('ik_text', 0, pt(450, -250, 120), '\n'.join(lines),
-                              (1.0, 0.75, 0.3)))
+        self.ik_rows = rows
         if log:
             self.get_logger().info('\n'.join(lines))
         return out
 
 
+class Readout(QTableWidget):
+    """Always-on-top table at the top right of the screen with the FK/IK numbers."""
+
+    HEADERS = ('', 'J1 [deg]', 'Z [mm]', 'J2 [deg]', 'X [mm]', 'Y [mm]', 'Z [mm]', 'check')
+
+    def __init__(self, node, font_pt):
+        super().__init__(5, len(self.HEADERS))
+        self._node = node
+        self.setWindowTitle('GRASS kinematics check')
+        self.setWindowFlags(self.windowFlags() | Qt.WindowStaysOnTopHint)
+        font = QFont('Monospace', font_pt)
+        font.setStyleHint(QFont.TypeWriter)
+        self.setFont(font)
+        self.horizontalHeader().setFont(QFont('Sans', font_pt, QFont.Bold))
+        self.setHorizontalHeaderLabels(self.HEADERS)
+        self.verticalHeader().hide()
+        self.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.setSelectionMode(QTableWidget.NoSelection)
+        self.setStyleSheet('QTableWidget { background: #1e1e22; color: #eeeeee; gridline-color: #444; }'
+                           'QHeaderView::section { background: #2d2d33; color: #eeeeee; }')
+        self.refresh()
+        self.resizeColumnsToContents()
+        self.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
+        geo = QApplication.primaryScreen().availableGeometry()
+        width = min(geo.width() - 40, self.horizontalHeader().length() + 60)
+        self.resize(width, self.verticalHeader().length() + self.horizontalHeader().height() + 12)
+        self.move(geo.right() - self.width() - 20, geo.top() + 40)
+
+    def _set(self, row, col, text, color=None, bold=False):
+        item = QTableWidgetItem(text)
+        item.setTextAlignment(int(Qt.AlignRight | Qt.AlignVCenter) if 0 < col < 7
+                              else int(Qt.AlignLeft | Qt.AlignVCenter))
+        if color:
+            item.setForeground(QColor(color))
+        if bold:
+            f = self.font()
+            f.setBold(True)
+            item.setFont(f)
+        self.setItem(row, col, item)
+
+    def refresh(self):
+        rows = (getattr(self._node, 'fk_rows', None) or [('Sliders → kinematics.py', None, None,
+                                                         'waiting for TF', None)])
+        rows = list(rows) + [None] * (2 - len(rows)) + list(self._node.ik_rows)
+        for r in range(self.rowCount()):
+            for c in range(self.columnCount()):
+                self._set(r, c, '')
+        for r, row in enumerate(rows[:self.rowCount()]):
+            if row is None:
+                continue
+            name, joints, xyz, check, ok = row
+            self._set(r, 0, name, bold=True)
+            if joints:
+                for c, v in enumerate(joints, 1):
+                    self._set(r, c, f'{v:.2f}' if c != 2 else f'{v:.1f}', '#8fd3ff')
+            if xyz:
+                for c, v in enumerate(xyz, 4):
+                    self._set(r, c, f'{v:.2f}')
+            self._set(r, 7, check, None if ok is None else ('#55dd66' if ok else '#ff5555'))
+
+
 def main(args=None):
     rclpy.init(args=args)
     node = KinCheck()
+    node.declare_parameter('font_pt', 16)
+    app = QApplication(sys.argv)
+    table = Readout(node, int(node.get_parameter('font_pt').value))
+    table.show()
+    executor = SingleThreadedExecutor()
+    executor.add_node(node)
+
+    def pump():
+        if not rclpy.ok():          # ROS already shut down by Ctrl-C / launch
+            app.quit()
+            return
+        try:
+            for _ in range(50):
+                executor.spin_once(timeout_sec=0)
+        except Exception:           # context invalidated mid-spin during shutdown
+            app.quit()
+            return
+        table.refresh()
+
+    timer = QTimer()
+    timer.timeout.connect(pump)
+    timer.start(50)
+    signal.signal(signal.SIGINT, lambda *_: app.quit())
     try:
-        rclpy.spin(node)
-    except KeyboardInterrupt:
-        pass
+        app.exec_()
     finally:
+        executor.shutdown()
         node.destroy_node()
         if rclpy.ok():
             rclpy.shutdown()

@@ -9,7 +9,7 @@ import os
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, OpaqueFunction
+from launch.actions import DeclareLaunchArgument, OpaqueFunction, Shutdown
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 
@@ -23,10 +23,11 @@ def _setup(context):
     return [
         Node(package='robot_state_publisher', executable='robot_state_publisher',
              parameters=[{'robot_description': stick_urdf(load_robot_config(config))}]),
-        Node(package='joint_state_publisher_gui', executable='joint_state_publisher_gui'),
+        Node(package='joint_state_publisher_gui', executable='joint_state_publisher_gui',
+             on_exit=Shutdown()),
         Node(package='grass_sim', executable='kin_check', output='screen',
-             parameters=[{'robot_config': config}]),
-        Node(package='rviz2', executable='rviz2', arguments=['-d', rviz]),
+             parameters=[{'robot_config': config}], on_exit=Shutdown()),
+        Node(package='rviz2', executable='rviz2', arguments=['-d', rviz], on_exit=Shutdown()),
     ]
 
 
