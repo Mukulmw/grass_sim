@@ -67,7 +67,6 @@ Visualization Manager:
         fk: true
         ik_label: true
         ik_solution: true
-        ik_text: true
         workspace_limits: true
         workspace_rings: true
       Topic:
@@ -147,25 +146,25 @@ Visualization Manager:
   Views:
     Current:
       Class: rviz_default_plugins/Orbit
-      Distance: 1.2964067459106445
+      Distance: 1.584791660308838
       Enable Stereo Rendering:
         Stereo Eye Separation: 0.05999999865889549
         Stereo Focal Distance: 1
         Swap Stereo Eyes: false
         Value: false
       Focal Point:
-        X: 0
-        Y: 0.20000000298023224
-        Z: 0
+        X: 0.07487600296735764
+        Y: -0.04420100152492523
+        Z: -0.14077000319957733
       Focal Shape Fixed Size: true
       Focal Shape Size: 0.05000000074505806
       Invert Z Axis: false
       Name: Current View
       Near Clip Distance: 0.009999999776482582
-      Pitch: 0.7100000381469727
+      Pitch: 0.9399998188018799
       Target Frame: <Fixed Frame>
       Value: Orbit (rviz)
-      Yaw: 4.109997749328613
+      Yaw: 3.8750035762786865
     Saved: ~
 Window Geometry:
   Displays:
