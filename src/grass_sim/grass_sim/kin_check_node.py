@@ -1,7 +1,10 @@
 """
 Kinematics validation in RViz, against grass_controller.kinematics (the controller's own code).
 
-FK check: the stick model is posed by robot_state_publisher from /joint_states (sliders), i.e. by
+Joint sliders: a panel in robot units (J1/J2 deg, Z mm, ranges from robot.yaml) sets the pose;
+this node publishes it on /joint_states in ROS units (rad, m) at 10 Hz.
+
+FK check: the stick model is posed by robot_state_publisher from /joint_states, i.e. by
 the URDF/TF chain. For the same joint values this node evaluates kinematics.forward_kinematics()
 and draws its result as a translucent sphere around the stick tip; the TF-vs-FK error in mm is in
 the table window (top right of the screen, always on top).
@@ -35,6 +38,7 @@ from visualization_msgs.msg import (InteractiveMarker, InteractiveMarkerControl,
 
 from grass_controller import kinematics
 from grass_controller.robot_config import default_robot_config_path, load_robot_config
+from grass_sim.joint_sliders import JointSliders
 
 GREEN, RED, WHITE = (0.2, 0.9, 0.3), (0.95, 0.2, 0.2), (1.0, 1.0, 1.0)
 
@@ -64,6 +68,9 @@ class KinCheck(Node):
         TransformListener(self._tf, self)
         self._pub = self.create_publisher(MarkerArray, 'kin_check/markers', 10)
         self.create_subscription(JointState, 'joint_states', self._on_joints, 10)
+        self._joint_pub = self.create_publisher(JointState, 'joint_states', 10)
+        self.command = (0.0, 0.0, 0.0)      # (j1_deg, z_mm, j2_deg), set by the slider panel
+        self.create_timer(0.1, self._publish_joints)
 
         self._server = InteractiveMarkerServer(self, 'kin_check/ik_target')
         self._server.insert(self._target_marker(), feedback_callback=self._on_target)
@@ -121,6 +128,19 @@ class KinCheck(Node):
                                            ('+X', 660, 0))):
             out.append(self._text('axes', i, pt(x, y, 0), label, (0.7, 0.7, 0.7), 0.025))
         return out
+
+    # ------------------------------------------------------------------ joint command
+    def set_command(self, pose):
+        self.command = tuple(pose)
+        self._publish_joints()
+
+    def _publish_joints(self):
+        j1, z, j2 = self.command
+        msg = JointState()
+        msg.header.stamp = self.get_clock().now().to_msg()
+        msg.name = ['j1', 'z', 'j2']
+        msg.position = [math.radians(j1), z / 1000.0, math.radians(j2)]
+        self._joint_pub.publish(msg)
 
     # ------------------------------------------------------------------ FK check
     def _on_joints(self, msg):
@@ -304,14 +324,25 @@ class Readout(QTableWidget):
                     self._set(r, c, f'{v:.2f}')
             self._set(r, 7, check, None if ok is None else ('#55dd66' if ok else '#ff5555'))
 
+    def closeEvent(self, event):
+        QApplication.quit()
+        super().closeEvent(event)
+
 
 def main(args=None):
     rclpy.init(args=args)
     node = KinCheck()
     node.declare_parameter('font_pt', 16)
     app = QApplication(sys.argv)
-    table = Readout(node, int(node.get_parameter('font_pt').value))
+    font_pt = int(node.get_parameter('font_pt').value)
+    table = Readout(node, font_pt)
     table.show()
+    sliders = JointSliders(node._cfg, font_pt, node.set_command)
+    node.set_command(sliders.pose())
+    geo = QApplication.primaryScreen().availableGeometry()
+    sliders.adjustSize()
+    sliders.move(geo.left() + 20, geo.top() + 40)
+    sliders.show()
     executor = SingleThreadedExecutor()
     executor.add_node(node)
 
